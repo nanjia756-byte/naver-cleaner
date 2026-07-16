@@ -4,7 +4,7 @@ import re
 import io
 
 st.set_page_config(page_title="Naver 评论清洗器", page_icon="🧹")
-st.title("🧹 运营数据一键清洗助手")
+st.title("🧹 nan的秘制数据一键清洗助手")
 
 uploaded_file = st.file_uploader("上传采集的 Excel/CSV 文件", type=['xlsx', 'csv'])
 
