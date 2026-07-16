@@ -3,23 +3,20 @@ import pandas as pd
 import re
 import io
 
-# 页面配置
 st.set_page_config(page_title="Naver 评论清洗器", page_icon="🧹")
 st.title("🧹 nan的秘制运营数据一键清洗助手")
-st.write("请上传导出的 Excel 或 CSV 文件，系统将自动识别数据列并进行深度清洗。")
 
 # 1. 文件上传
-uploaded_file = st.file_uploader("拖入采集到的数据文件", type=['csv', 'xlsx'])
+uploaded_file = st.file_uploader("请上传 CSV 或 Excel 文件", type=['csv', 'xlsx'])
 
 if uploaded_file:
     try:
         # 读取文件
         df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
         
-        # 2. 智能锁定包含有用数据的列
+        # 2. 智能锁定数据列
         target_col = None
         for col in df.columns:
-            # 搜索包含服务器关键词的列
             if df[col].astype(str).str.contains(r'서버|S\d+', regex=True).any():
                 target_col = col
                 break
@@ -27,56 +24,48 @@ if uploaded_file:
         if not target_col:
             target_col = df.columns[2] if len(df.columns) > 2 else df.columns[0]
             st.warning(f"⚠️ 未检测到标准区服格式，默认处理列: {target_col}")
-        else:
-            st.success(f"✅ 已自动识别数据列: {target_col}")
 
-        # 3. 深度清洗逻辑 (最终完整版)
+        # 3. 深度清洗逻辑 (最终整合版)
         def parse_row(text):
             text = str(text).strip()
             
-            # A. 提取区服 (兼容 29서버, S26, s1 等)
+            # A. 提取区服
             srv = re.search(r'([A-Za-z0-9]+서버|S\d+)', text, re.IGNORECASE)
             srv_name = srv.group(1) if srv else "未知"
-            
-            # B. 移除区服文字
             clean = text.replace(srv_name, "", 1).strip()
             
-            # C. 强力清洗：剔除 10 位以上长数字ID 和 ID 标签
+            # B. 过滤长数字ID 和 关键词 (닉넴/ID)
             clean = re.sub(r'\d{10,}', '', clean)
-            clean = re.sub(r'ID[:\s]*', '', clean, flags=re.IGNORECASE)
+            clean = re.sub(r'(ID[:\s]*|닉넴)', ' ', clean, flags=re.IGNORECASE)
             
-            # D. 符号归一化：将所有分隔符统一转化为空格
+            # C. 符号清理 (将符号转为空格)
             clean = re.sub(r'[/:\s]+', ' ', clean).strip()
             
-            # E. 分割用户名与评论 (以第一个空格为界)
+            # D. 分割用户名与评论
             parts = clean.split(' ', 1)
             name = parts[0] if len(parts) > 0 and parts[0] else "匿名"
             comm = parts[1] if len(parts) > 1 else "无内容"
             
-            # F. 用户名二次防错：如果 name 看起来像垃圾，则归入评论
-            # (如识别出了“ID”、“닉넴” 或无效符号)
-            if name.upper() in ["ID", "닉넴", ".", "/"] or len(name) < 1:
+            # E. 最终纠偏层
+            # 只有当名字是“纯点号”且“评论内容极其简短”时，才判定为噪音并设为匿名
+            if name == "." and len(comm) < 3:
+                name = "匿名"
+            # 拦截掉名字识别为 ID 的情况，将其修正
+            elif name.upper() in ["ID", "닉넴"]:
                 comm = f"{name} {comm}".strip()
                 name = "匿名"
                 
             return pd.Series([srv_name, name, comm])
 
-        # 4. 执行清洗
+        # 4. 执行并显示
         res = df[target_col].apply(parse_row)
         res.columns = ['区服', '玩家名', '评论内容']
-        
-        # 显示结果
         st.dataframe(res)
         
-        # 5. 提供下载
+        # 5. 下载功能
         towrite = io.BytesIO()
         res.to_excel(towrite, index=False)
-        st.download_button(
-            label="📥 下载清洗后的报表",
-            data=towrite.getvalue(),
-            file_name="清洗完成_玩家评论.xlsx",
-            mime="application/vnd.ms-excel"
-        )
+        st.download_button("📥 下载清洗报表", towrite.getvalue(), "cleaned_data.xlsx")
         
     except Exception as e:
-        st.error(f"处理失败，请确认文件格式是否标准: {e}")
+        st.error(f"处理错误: {e}")
