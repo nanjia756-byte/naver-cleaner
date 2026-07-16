@@ -11,14 +11,12 @@ uploaded_file = st.file_uploader("上传采集的 Excel/CSV 文件", type=['xlsx
 if uploaded_file:
     try:
         # 读取文件
-        if uploaded_file.name.endswith('.xlsx'):
-            df = pd.read_excel(uploaded_file)
-        else:
-            df = pd.read_csv(uploaded_file)
+        df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
         
-        # 自动锁定数据列（优先匹配包含区服特征的列）
+        # 自动锁定数据列
         target_col = None
-        server_regex = r'(S\s*\d+|[0-9]+\s*(?:서버|섭))'
+        # 匹配逻辑：优先匹配 S7+空格+서버 等组合
+        server_regex = r'((?:S\s*\d+|[0-9]+)\s*(?:서버|섭))'
         
         for col in df.columns:
             if df[col].astype(str).str.contains(server_regex, regex=True, flags=re.IGNORECASE).any():
@@ -26,37 +24,37 @@ if uploaded_file:
                 break
         
         if not target_col:
-            target_col = df.columns[2] if len(df.columns) > 2 else df.columns[0]
+            target_col = df.columns[0]
         
         st.info(f"正在清洗列: **{target_col}**")
 
-        # 核心：精准提取并彻底清除区服标记
         def parse_row(text):
             text = str(text).strip()
             
-            # 强化正则：匹配 S数字、S 空格 数字、数字 空格 서버/섭
-            server_pattern = r'(S\s*\d+|[0-9]+\s*(?:서버|섭))'
+            # 强化正则：确保 S7 서버 或 7 서버 作为一个整体被匹配
+            server_pattern = r'((?:S\s*\d+|[0-9]+)\s*(?:서버|섭)|S\s*\d+)'
             
             # 1. 提取区服
             matches = re.findall(server_pattern, text, re.IGNORECASE)
-            srv_name = " ".join([m.strip() for m in matches]) if matches else "未知"
+            # 取第一个匹配项作为区服，并清理多余空格
+            srv_name = matches[0].strip() if matches else "未知"
             
-            # 2. 从原文本中彻底移除这些标记
+            # 2. 从原文本中彻底移除匹配到的整个区服字符串
             clean_text = re.sub(server_pattern, ' ', text, flags=re.IGNORECASE)
             
-            # 3. 过滤长ID (10位以上数字)、ID标记、닉넴关键词
+            # 3. 过滤干扰项
             clean_text = re.sub(r'(ID[:\s]*\d+|닉넴|\d{10,})', ' ', clean_text, flags=re.IGNORECASE)
             
-            # 4. 符号标准化：处理多余空格和特殊符号
-            clean_text = re.sub(r'^[./:\s]+', '', clean_text)  # 去除开头特殊符号
-            clean_text = re.sub(r'\s+', ' ', clean_text).strip() # 将所有多余空格缩减为一个
+            # 4. 符号标准化：去除头部特殊符号，压缩空格
+            clean_text = re.sub(r'^[./:\s]+', '', clean_text)
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
             
             # 5. 分割用户名与评论
             parts = clean_text.split(' ', 1)
             name = parts[0] if len(parts) > 0 and parts[0] else "匿名"
             comm = parts[1] if len(parts) > 1 else "无内容"
             
-            # 纠偏：如果是“无效点号”或“ID”关键词，修正为匿名
+            # 纠偏
             if (name == "." or name.upper() in ["ID", "닉넴"]) and len(comm) > 0:
                 name = "匿名"
                 
@@ -69,9 +67,9 @@ if uploaded_file:
         # 显示预览
         st.dataframe(res.head(10))
         
-        # 下载功能：改为使用 BytesIO 直接导出，不依赖 xlsxwriter
+        # 下载：不使用 xlsxwriter，直接用 pandas 原生导出
         towrite = io.BytesIO()
-        res.to_excel(towrite, index=False) # 直接导出，不指定 engine
+        res.to_excel(towrite, index=False)
         
         st.download_button(
             label="📥 下载清洗结果", 
