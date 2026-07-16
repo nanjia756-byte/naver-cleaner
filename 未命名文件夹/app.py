@@ -12,48 +12,44 @@ if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
         
-        # 自动锁定数据列
         target_col = None
         for col in df.columns:
-            # 兼容性匹配：S+数字, 数字+서버, 数字+섭
-            if df[col].astype(str).str.contains(r'(S\d+|[0-9]+(?:서버|섭))', regex=True, flags=re.IGNORECASE).any():
+            if df[col].astype(str).str.contains(r'(S\d+|[0-9]+(?:서버|섭|버서)?)', regex=True, flags=re.IGNORECASE).any():
                 target_col = col
                 break
         
         if not target_col:
             target_col = df.columns[2] if len(df.columns) > 2 else df.columns[0]
 
-        # 核心：精准提取区服并彻底挖空
         def parse_row(text):
             text = str(text).strip()
             
-            # 定义所有可能的服务器正则
-            server_pattern = r'(S\d+|[0-9]+(?:서버|섭))'
+            # 升级版正则：匹配 S数字、数字+서버/섭/버서 或仅数字(作为区服)
+            # 增加了对버서的容错，并允许匹配仅数字的情况
+            server_pattern = r'([Ss]\d+|[0-9]+(?:서버|섭|버서)?)'
             
-            # 找出文中所有的服务器标记
-            matches = re.findall(server_pattern, text, re.IGNORECASE)
+            # 提取区服
+            match = re.search(server_pattern, text, re.IGNORECASE)
+            srv_name = match.group(1) if match else "未知"
             
-            # 将找到的所有服务器标记合并为区服列的内容
-            srv_name = " ".join(matches) if matches else "未知"
-            
-            # 从原文本中彻底移除这些标记
-            clean_text = re.sub(server_pattern, ' ', text, flags=re.IGNORECASE)
+            # 移除已匹配的区服部分，使用正则替换以保持结构
+            clean_text = re.sub(server_pattern, ' ', text, count=1, flags=re.IGNORECASE)
             
             # 过滤长ID (10位以上数字)、ID标记、닉넴关键词
             clean_text = re.sub(r'(ID[:\s]*\d+|닉넴|\d{10,})', ' ', clean_text, flags=re.IGNORECASE)
             
-            # 符号标准化：将开头点号、/、:、空格统一处理
-            clean_text = re.sub(r'^[./:\s]+', '', clean_text)
+            # 统一分隔符并清理多余空格
             clean_text = re.sub(r'[/|:\s]+', ' ', clean_text).strip()
             
-            # 分割用户名与评论
+            # 分割用户名与评论内容
             parts = clean_text.split(' ', 1)
             name = parts[0] if len(parts) > 0 and parts[0] else "匿名"
             comm = parts[1] if len(parts) > 1 else "无内容"
             
-            # 纠偏：如果是“无效点号”或“ID”关键词，修正为匿名
-            if (name == "." or name.upper() in ["ID", "닉넴"]) and len(comm) > 0:
-                name = "匿名"
+            # 纠偏：如果是“ID”关键词或无效单字符，修正为匿名
+            if (name.upper() in ["ID", "닉넴", "."] or len(name) < 2) and len(comm) > 0:
+                # 如果发现名字是无效的，但comm里包含了疑似名字的信息，可以进一步处理
+                if name == "ID": name = "匿名"
                 
             return pd.Series([srv_name, name, comm])
 
@@ -63,7 +59,6 @@ if uploaded_file:
         
         st.dataframe(res)
         
-        # 下载
         towrite = io.BytesIO()
         res.to_excel(towrite, index=False)
         st.download_button("📥 下载清洗结果", towrite.getvalue(), "cleaned_data.xlsx")
