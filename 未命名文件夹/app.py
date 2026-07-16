@@ -69,10 +69,9 @@ if uploaded_file:
         # 显示预览
         st.dataframe(res.head(10))
         
-        # 下载功能
+        # 下载功能：改为使用 BytesIO 直接导出，不依赖 xlsxwriter
         towrite = io.BytesIO()
-        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
-            res.to_excel(writer, index=False)
+        res.to_excel(towrite, index=False) # 直接导出，不指定 engine
         
         st.download_button(
             label="📥 下载清洗结果", 
