@@ -34,26 +34,34 @@ if uploaded_file:
             target_column = df.columns[2] if len(df.columns) > 2 else df.columns[0]
             
         # 3. 核心清洗逻辑 (针对 p1 和 p2 情况优化)
-        def parse_row(text):
+       def parse_row(text):
             text = str(text).strip()
-            # 提取区服
-            server_match = re.search(r'([A-Za-z0-9]+서버)', text)
+            
+            # 1. 扩展提取区服：
+            # 兼容模式 A: 29서버 (数字+서버)
+            # 兼容模式 B: S1 (S+数字，常见区服代称)
+            # 兼容模式 C: 12 (纯数字，如果有的话，但容易误伤，建议优先匹配前两种)
+            server_match = re.search(r'([A-Za-z0-9]+서버|S\d+)', text, re.IGNORECASE)
             server_name = server_match.group(1) if server_match else "未知"
             
-            # 移除区服文字
+            # 2. 移除识别到的区服信息
             clean = text.replace(server_name, "", 1).strip()
             
-            # 强化切割逻辑：
-            # 以第一个“非字母数字”的界限进行初次切割
-            # 这样处理 슈/739... 会切出“슈”和“739...”
-            # 处理 🐾 축협... 会切出“🐾”和“축협...”
-            parts = re.split(r'[\s/:]+', clean, maxsplit=1)
+            # 3. 继续之前的清理逻辑
+            clean = re.sub(r'^[/:\s]+', '', clean)
             
+            # 4. 优化切割逻辑：优先拆分掉区服和名字之间的符号
+            if '/' in clean:
+                parts = clean.split('/', 1)
+            elif ':' in clean:
+                parts = clean.split(':', 1)
+            else:
+                parts = re.split(r'\s+', clean, maxsplit=1)
+                
             player_name = parts[0] if len(parts) > 0 and parts[0] != "" else "匿名"
             comment = parts[1] if len(parts) > 1 else "无内容"
             
             return pd.Series([server_name, player_name, comment])
-
         # 4. 执行清洗
         result_df = df[target_column].apply(parse_row)
         result_df.columns = ['区服', '玩家名', '评论内容']
