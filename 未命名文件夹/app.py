@@ -15,8 +15,7 @@ if uploaded_file:
         
         # 自动锁定数据列
         target_col = None
-        # 匹配逻辑：优先匹配 S7+空格+서버 等组合
-        server_regex = r'((?:S\s*\d+|[0-9]+)\s*(?:서버|섭))'
+        server_regex = r'((?:S\s*\d+|[0-9]+)\s*(?:서버|섭)|S\s*\d+)'
         
         for col in df.columns:
             if df[col].astype(str).str.contains(server_regex, regex=True, flags=re.IGNORECASE).any():
@@ -31,31 +30,31 @@ if uploaded_file:
         def parse_row(text):
             text = str(text).strip()
             
-            # 强化正则：确保 S7 서버 或 7 서버 作为一个整体被匹配
+            # 1. 提取区服 (识别 S7, 7서버, 7 서버 等)
             server_pattern = r'((?:S\s*\d+|[0-9]+)\s*(?:서버|섭)|S\s*\d+)'
-            
-            # 1. 提取区服
             matches = re.findall(server_pattern, text, re.IGNORECASE)
-            # 取第一个匹配项作为区服，并清理多余空格
             srv_name = matches[0].strip() if matches else "未知"
             
-            # 2. 从原文本中彻底移除匹配到的整个区服字符串
+            # 2. 移除区服字符串
             clean_text = re.sub(server_pattern, ' ', text, flags=re.IGNORECASE)
             
-            # 3. 过滤干扰项
+            # 3. 过滤干扰项 (ID, 10位数字等)
             clean_text = re.sub(r'(ID[:\s]*\d+|닉넴|\d{10,})', ' ', clean_text, flags=re.IGNORECASE)
             
-            # 4. 符号标准化：去除头部特殊符号，压缩空格
-            clean_text = re.sub(r'^[./:\s]+', '', clean_text)
+            # 4. 彻底清理开头和中间多余的标点符号（如 , / : .）
+            clean_text = re.sub(r'^[.,/:\s]+', '', clean_text)
+            clean_text = re.sub(r'\s*[.,/:]\s*', ' ', clean_text)
+            
+            # 5. 压缩多余空格
             clean_text = re.sub(r'\s+', ' ', clean_text).strip()
             
-            # 5. 分割用户名与评论
+            # 6. 分割用户名与评论
             parts = clean_text.split(' ', 1)
             name = parts[0] if len(parts) > 0 and parts[0] else "匿名"
             comm = parts[1] if len(parts) > 1 else "无内容"
             
-            # 纠偏
-            if (name == "." or name.upper() in ["ID", "닉넴"]) and len(comm) > 0:
+            # 7. 纠偏：若名字仍为无效标点或保留词，则修正为匿名
+            if re.match(r'^[.,/:\s]+$', name) or name.upper() in ["ID", "닉넴"]:
                 name = "匿名"
                 
             return pd.Series([srv_name, name, comm])
@@ -67,7 +66,7 @@ if uploaded_file:
         # 显示预览
         st.dataframe(res.head(10))
         
-        # 下载：不使用 xlsxwriter，直接用 pandas 原生导出
+        # 下载：直接使用 pandas 原生导出，无需额外安装 xlsxwriter
         towrite = io.BytesIO()
         res.to_excel(towrite, index=False)
         
